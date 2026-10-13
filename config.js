@@ -17,5 +17,5 @@ const SHOP = {
 
 // From Supabase: Project Settings -> API
 // The anon public key is safe to put here. NEVER put the service_role key here.
-const SUPABASE_URL = "";
+const SUPABASE_URL = "https://ywvgxxmwcjsamdedwijl.supabase.co";
 const SUPABASE_ANON_KEY = "";
