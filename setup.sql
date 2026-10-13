@@ -18,6 +18,10 @@ create table if not exists public.products (
 
 alter table public.products enable row level security;
 
+-- Let the website reach the table (the policies below still decide who sees/edits what)
+grant select on public.products to anon, authenticated;
+grant insert, update, delete on public.products to authenticated;
+
 -- Everyone can see visible products
 create policy "public can read visible products"
   on public.products for select
