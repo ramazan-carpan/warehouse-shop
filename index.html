@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warehouse Deals</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1 id="shopName"></h1>
+  <p class="tagline" id="tagline"></p>
+</header>
+
+<div class="tools">
+  <input type="search" id="search" placeholder="Search products…" aria-label="Search products">
+  <select id="category" aria-label="Category" style="display:none"></select>
+</div>
+
+<main id="grid"><p class="empty">Loading…</p></main>
+
+<div class="bar" id="bar">
+  <div class="bar-inner">
+    <div class="bar-total"><strong id="barCount"></strong><br><span id="barTotal"></span></div>
+    <button class="btn" id="openOrder">Send order</button>
+  </div>
+</div>
+
+<dialog id="orderDialog">
+  <form class="dlg" id="orderForm">
+    <h2>Your order</h2>
+    <div class="summary" id="summary"></div>
+    <label>Your name
+      <input type="text" id="custName" required autocomplete="name">
+    </label>
+    <label>Department / shift (optional)
+      <input type="text" id="custDept">
+    </label>
+    <div class="actions">
+      <button type="button" class="btn ghost" id="cancelOrder">Cancel</button>
+      <button type="submit" class="btn" id="sendBtn">Send</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="common.js"></script>
+<script>
+  let PRODUCTS = [];
+  const cart = {}; // product id -> quantity
+  const byId = id => PRODUCTS.find(p => p.id === id);
+
+  document.title = SHOP.name;
+  document.getElementById("shopName").textContent = SHOP.name;
+  document.getElementById("tagline").textContent = SHOP.tagline;
+  document.getElementById("sendBtn").textContent =
+    SHOP.orderMethod === "sms" ? "Send by SMS" : "Send on WhatsApp";
+  const catSel = document.getElementById("category");
+
+  async function load() {
+    const db = getDb();
+    if (!db) {
+      document.getElementById("grid").innerHTML =
+        '<p class="empty">Shop is not connected yet. Add your Supabase keys in config.js.</p>';
+      return;
+    }
+    const { data, error } = await db.from("products").select("*")
+      .eq("visible", true).order("created_at", { ascending: false });
+    if (error) {
+      document.getElementById("grid").innerHTML = `<p class="empty">Could not load products: ${esc(error.message)}</p>`;
+      return;
+    }
+    PRODUCTS = data;
+    const categories = [...new Set(PRODUCTS.map(p => p.category).filter(Boolean))].sort();
+    catSel.innerHTML = '<option value="">All categories</option>' +
+      categories.map(c => `<option>${esc(c)}</option>`).join("");
+    catSel.style.display = categories.length ? "" : "none";
+    render();
+  }
+
+  function render() {
+    const q = document.getElementById("search").value.trim().toLowerCase();
+    const cat = catSel.value;
+    const items = PRODUCTS.filter(p =>
+      (!cat || p.category === cat) &&
+      (!q || (p.name + " " + (p.note || "")).toLowerCase().includes(q)));
+
+    document.getElementById("grid").innerHTML = items.length ? items.map(p => {
+      const qty = cart[p.id] || 0;
+      return `<article class="card">
+        <img src="${esc(p.image_url || PLACEHOLDER)}" alt="${esc(p.name)}" loading="lazy" onerror="this.onerror=null;this.src=PLACEHOLDER">
+        <div class="body">
+          <div class="name">${esc(p.name)}</div>
+          ${p.note ? `<div class="note">${esc(p.note)}</div>` : ""}
+          ${retailLink(p)}
+          <div class="row">
+            <span class="price">${fmt(p.price)}</span>
+            <div class="qty">
+              <button type="button" data-id="${p.id}" data-d="-1" ${qty ? "" : "disabled"} aria-label="Remove one">−</button>
+              <span>${qty}</span>
+              <button type="button" data-id="${p.id}" data-d="1" aria-label="Add one">+</button>
+            </div>
+          </div>
+        </div>
+      </article>`;
+    }).join("") : '<p class="empty">No products found.</p>';
+
+    const lines = Object.entries(cart);
+    const count = lines.reduce((s, [, q]) => s + q, 0);
+    const total = lines.reduce((s, [id, q]) => s + byId(id).price * q, 0);
+    document.getElementById("bar").classList.toggle("show", count > 0);
+    document.getElementById("barCount").textContent = count + (count === 1 ? " item" : " items");
+    document.getElementById("barTotal").textContent = "Total " + fmt(total);
+  }
+
+  document.getElementById("grid").addEventListener("click", e => {
+    const b = e.target.closest("button[data-id]");
+    if (!b) return;
+    const next = Math.max(0, (cart[b.dataset.id] || 0) + +b.dataset.d);
+    if (next) cart[b.dataset.id] = next; else delete cart[b.dataset.id];
+    render();
+  });
+  document.getElementById("search").addEventListener("input", render);
+  catSel.addEventListener("change", render);
+
+  function orderLines() {
+    let total = 0;
+    const lines = Object.entries(cart).map(([id, q]) => {
+      const p = byId(id); total += p.price * q;
+      return { q, p, sub: p.price * q };
+    });
+    return { lines, total };
+  }
+
+  const dlg = document.getElementById("orderDialog");
+  document.getElementById("openOrder").addEventListener("click", () => {
+    const { lines, total } = orderLines();
+    document.getElementById("summary").innerHTML = lines.map(({ q, p, sub }) =>
+      `<div><span>${q} × ${esc(p.name)}</span><span>${fmt(sub)}</span></div>`).join("") +
+      `<div class="total"><span>Total</span><span>${fmt(total)}</span></div>`;
+    try { document.getElementById("custName").value = localStorage.getItem("custName") || ""; } catch {}
+    dlg.showModal();
+  });
+  document.getElementById("cancelOrder").addEventListener("click", () => dlg.close());
+
+  document.getElementById("orderForm").addEventListener("submit", e => {
+    e.preventDefault();
+    const name = document.getElementById("custName").value.trim();
+    const dept = document.getElementById("custDept").value.trim();
+    try { localStorage.setItem("custName", name); } catch {}
+    const { lines, total } = orderLines();
+    const msg = `Hi! New order from ${name}${dept ? " (" + dept + ")" : ""}:\n` +
+      lines.map(({ q, p, sub }) => `- ${q} x ${p.name} (${fmt(sub)})`).join("\n") +
+      `\nTotal: ${fmt(total)}`;
+    const url = SHOP.orderMethod === "sms"
+      ? `sms:+${SHOP.phone}?&body=${encodeURIComponent(msg)}`
+      : `https://wa.me/${SHOP.phone}?text=${encodeURIComponent(msg)}`;
+    dlg.close();
+    window.location.href = url;
+  });
+
+  load();
+</script>
+</body>
+</html>
