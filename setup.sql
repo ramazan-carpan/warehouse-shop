@@ -13,8 +13,12 @@ create table if not exists public.products (
   retail_price numeric,
   image_url    text,
   image_path   text,
+  images       jsonb not null default '[]',
   visible      boolean not null default true
 );
+
+-- Multiple photos per product. Already set up the shop before? Run just this line:
+alter table public.products add column if not exists images jsonb not null default '[]';
 
 alter table public.products enable row level security;
 

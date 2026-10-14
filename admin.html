@@ -5,17 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>Shop Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <h1>Shop Admin</h1>
-  <p class="tagline"><a class="retail" href="index.html">← View shop</a></p>
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Admin</p>
+    <h1>Manage products</h1>
+    <p class="tagline"><a href="index.html">← View shop</a></p>
+  </div>
 </header>
 
 <!-- Login -->
 <section id="loginView" class="notice" hidden>
   <form class="dlg" id="loginForm" style="padding:0">
+    <h2>Log in</h2>
     <label>Email <input type="email" id="email" required autocomplete="username"></label>
     <label>Password <input type="password" id="password" required autocomplete="current-password"></label>
     <p class="msg" id="loginMsg"></p>
@@ -25,12 +32,19 @@
 
 <!-- Products -->
 <section id="adminView" hidden>
-  <div class="tools">
-    <button class="btn" id="addBtn">+ Add product</button>
-    <input type="search" id="search" placeholder="Search…" aria-label="Search products">
-    <button class="btn ghost" id="logoutBtn">Log out</button>
+  <div class="toolbar">
+    <div class="wrap">
+      <div class="toolrow">
+        <button class="btn" id="addBtn">+ Add product</button>
+        <div class="search">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input type="search" id="search" placeholder="Search…" aria-label="Search products">
+        </div>
+        <button class="btn ghost" id="logoutBtn">Log out</button>
+      </div>
+    </div>
   </div>
-  <main id="grid"></main>
+  <main class="grid" id="grid"></main>
 </section>
 
 <p class="notice" id="setupMsg" hidden>Not connected yet. Add your Supabase URL and anon key in <code>config.js</code>.</p>
@@ -38,10 +52,16 @@
 <dialog id="editDialog">
   <form class="dlg" id="editForm">
     <h2 id="editTitle">Add product</h2>
-    <img id="photoPreview" alt="" style="width:100%;height:180px;object-fit:contain;border-radius:10px;background:var(--line)">
-    <label>Photo
-      <input type="file" id="photo" accept="image/*">
-    </label>
+    <div class="photos" id="photos"></div>
+    <div class="photo-btns">
+      <label class="btn ghost" id="camBtn">📷 Take photo
+        <input type="file" id="camInput" accept="image/*" capture="environment" hidden>
+      </label>
+      <label class="btn ghost" id="pickBtn">🖼️ Choose photos
+        <input type="file" id="pickInput" accept="image/*" multiple hidden>
+      </label>
+    </div>
+    <p class="hint" id="photoHint"></p>
     <label>Name <input type="text" id="name" required></label>
     <div class="two">
       <label>My price <input type="number" id="price" min="0" step="0.01" inputmode="decimal" required></label>
@@ -71,7 +91,9 @@
   const $ = id => document.getElementById(id);
   let PRODUCTS = [];
   let editing = null;   // product being edited, or null when adding
-  let newPhoto = null;  // resized Blob waiting to upload
+  const MAX_PHOTOS = 5;
+  // Photos in the editor, cover first: saved ones are { path, url }, new ones { blob, url }.
+  let photos = [];
 
   async function init() {
     if (!db) { $("setupMsg").hidden = false; return; }
@@ -107,9 +129,13 @@
   function render() {
     const q = $("search").value.trim().toLowerCase();
     const items = PRODUCTS.filter(p => !q || p.name.toLowerCase().includes(q));
-    $("grid").innerHTML = items.length ? items.map(p => `
-      <article class="card${p.visible ? "" : " hidden"}">
-        <img src="${esc(p.image_url || PLACEHOLDER)}" alt="${esc(p.name)}" loading="lazy">
+    $("grid").innerHTML = items.length ? items.map(p => {
+      const pics = photosOf(p);
+      return `<article class="card${p.visible ? "" : " hidden"}" data-id="${p.id}">
+        <div class="media">
+          <img src="${esc(pics[0]?.url || PLACEHOLDER)}" alt="${esc(p.name)}" loading="lazy">
+          ${pics.length > 1 ? `<span class="pics">${pics.length} photos</span>` : ""}
+        </div>
         <div class="body">
           <div class="name">${esc(p.name)}</div>
           ${p.note ? `<div class="note">${esc(p.note)}</div>` : ""}
@@ -120,25 +146,28 @@
             <button class="btn ghost small" data-id="${p.id}">Edit</button>
           </div>
         </div>
-      </article>`).join("")
-      : '<p class="empty">No products yet. Tap “+ Add product”.</p>';
+      </article>`;
+    }).join("") : '<p class="empty">No products yet. Tap “+ Add product”.</p>';
   }
   $("search").addEventListener("input", render);
 
   $("grid").addEventListener("click", e => {
-    const b = e.target.closest("button[data-id]");
-    if (b) openEditor(PRODUCTS.find(p => p.id === b.dataset.id));
+    if (e.target.closest("a")) return;
+    const card = e.target.closest(".card");
+    if (card) openEditor(PRODUCTS.find(p => p.id === card.dataset.id));
   });
   $("addBtn").addEventListener("click", () => openEditor(null));
   $("cancelBtn").addEventListener("click", () => $("editDialog").close());
 
   function openEditor(p) {
-    editing = p; newPhoto = null;
+    editing = p;
+    photos.forEach(ph => ph.blob && URL.revokeObjectURL(ph.url));
+    photos = p ? photosOf(p).map(ph => ({ path: ph.path, url: ph.url })) : [];
+    renderPhotos();
     $("editForm").reset();
     $("editTitle").textContent = p ? "Edit product" : "Add product";
     $("deleteBtn").hidden = !p;
     $("editMsg").textContent = "";
-    $("photoPreview").src = p?.image_url || PLACEHOLDER;
     $("name").value = p?.name ?? "";
     $("price").value = p?.price ?? "";
     $("retailPrice").value = p?.retail_price ?? "";
@@ -167,24 +196,60 @@
     });
   }
 
-  $("photo").addEventListener("change", async e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    $("editMsg").textContent = "";
-    try {
-      newPhoto = await resizeImage(file);
-      $("photoPreview").src = URL.createObjectURL(newPhoto);
-    } catch (err) {
-      newPhoto = null;
-      $("editMsg").textContent = err.message;
-    }
+  function renderPhotos() {
+    $("photos").innerHTML = photos.length ? photos.map((ph, i) => `
+      <div class="thumb${i ? "" : " cover"}">
+        <img src="${esc(ph.url)}" alt="Photo ${i + 1}" data-i="${i}" title="Make cover photo">
+        <button type="button" class="x" data-x="${i}" aria-label="Remove photo">×</button>
+        ${i ? "" : "<em>Cover</em>"}
+      </div>`).join("")
+      : '<div class="photo-empty">No photos yet</div>';
+    const full = photos.length >= MAX_PHOTOS;
+    $("camBtn").classList.toggle("disabled", full);
+    $("pickBtn").classList.toggle("disabled", full);
+    $("photoHint").textContent = full
+      ? `Maximum ${MAX_PHOTOS} photos. Remove one to add another.`
+      : `Up to ${MAX_PHOTOS} photos.` + (photos.length > 1 ? " Tap a photo to make it the cover." : "");
+  }
+
+  $("photos").addEventListener("click", e => {
+    const x = e.target.dataset.x, i = e.target.dataset.i;
+    if (x !== undefined) {
+      const [ph] = photos.splice(+x, 1);
+      if (ph.blob) URL.revokeObjectURL(ph.url);
+    } else if (i !== undefined && +i > 0) {
+      photos.unshift(...photos.splice(+i, 1));
+    } else return;
+    renderPhotos();
   });
+
+  async function addFiles(e) {
+    const files = [...e.target.files];
+    e.target.value = "";  // so the same photo can be picked again
+    $("editMsg").textContent = "";
+    for (const file of files) {
+      if (photos.length >= MAX_PHOTOS) {
+        $("editMsg").textContent = `Only ${MAX_PHOTOS} photos per product.`;
+        break;
+      }
+      try {
+        const blob = await resizeImage(file);
+        photos.push({ blob, url: URL.createObjectURL(blob) });
+      } catch (err) {
+        $("editMsg").textContent = err.message;
+      }
+      renderPhotos();
+    }
+  }
+  $("camInput").addEventListener("change", addFiles);
+  $("pickInput").addEventListener("change", addFiles);
 
   $("editForm").addEventListener("submit", async e => {
     e.preventDefault();
     const save = $("saveBtn");
     save.disabled = true; save.textContent = "Saving…";
     $("editMsg").textContent = "";
+    const uploaded = [];  // new files, removed again if saving fails
     try {
       const row = {
         name: $("name").value.trim(),
@@ -195,24 +260,33 @@
         note: $("note").value.trim() || null,
         visible: $("visible").checked,
       };
-      let oldPath = null;
-      if (newPhoto) {
+      const images = [];
+      for (const ph of photos) {
+        if (!ph.blob) { images.push({ path: ph.path, url: ph.url }); continue; }
         const path = `${crypto.randomUUID()}.jpg`;
-        const up = await db.storage.from(BUCKET).upload(path, newPhoto, { contentType: "image/jpeg" });
+        const up = await db.storage.from(BUCKET).upload(path, ph.blob, { contentType: "image/jpeg" });
         if (up.error) throw up.error;
-        row.image_path = path;
-        row.image_url = db.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
-        oldPath = editing?.image_path;
+        uploaded.push(path);
+        images.push({ path, url: db.storage.from(BUCKET).getPublicUrl(path).data.publicUrl });
       }
+      row.images = images;
+      row.image_path = images[0]?.path ?? null;
+      row.image_url = images[0]?.url ?? null;
       const res = editing
         ? await db.from("products").update(row).eq("id", editing.id)
         : await db.from("products").insert(row);
       if (res.error) throw res.error;
-      if (oldPath) await db.storage.from(BUCKET).remove([oldPath]);
+      // Delete photos that were removed from this product.
+      const keep = new Set(images.map(i => i.path));
+      const gone = editing ? photosOf(editing).map(i => i.path).filter(p => p && !keep.has(p)) : [];
+      if (gone.length) await db.storage.from(BUCKET).remove(gone);
       $("editDialog").close();
       load();
     } catch (err) {
-      $("editMsg").textContent = "Could not save: " + err.message;
+      if (uploaded.length) await db.storage.from(BUCKET).remove(uploaded);
+      $("editMsg").textContent = /'images' column/.test(err.message)
+        ? "Database needs the photos update: run the \"images\" line from setup.sql in Supabase."
+        : "Could not save: " + err.message;
     } finally {
       save.disabled = false; save.textContent = "Save";
     }
@@ -222,7 +296,8 @@
     if (!editing || !confirm(`Delete "${editing.name}"?`)) return;
     const { error } = await db.from("products").delete().eq("id", editing.id);
     if (error) { $("editMsg").textContent = "Could not delete: " + error.message; return; }
-    if (editing.image_path) await db.storage.from(BUCKET).remove([editing.image_path]);
+    const paths = photosOf(editing).map(i => i.path).filter(Boolean);
+    if (paths.length) await db.storage.from(BUCKET).remove(paths);
     $("editDialog").close();
     load();
   });

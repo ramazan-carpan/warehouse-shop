@@ -4,161 +4,162 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Warehouse Deals</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <h1 id="shopName"></h1>
-  <p class="tagline" id="tagline"></p>
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Staff only</p>
+    <h1 id="shopName"></h1>
+    <p class="tagline" id="tagline"></p>
+  </div>
 </header>
 
-<div class="tools">
-  <input type="search" id="search" placeholder="Search products…" aria-label="Search products">
-  <select id="category" aria-label="Category" style="display:none"></select>
-</div>
-
-<main id="grid"><p class="empty">Loading…</p></main>
-
-<div class="bar" id="bar">
-  <div class="bar-inner">
-    <div class="bar-total"><strong id="barCount"></strong><br><span id="barTotal"></span></div>
-    <button class="btn" id="openOrder">Send order</button>
+<div class="toolbar">
+  <div class="wrap">
+    <div class="toolrow">
+      <div class="search">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input type="search" id="search" placeholder="Search products…" aria-label="Search products">
+      </div>
+    </div>
+    <div class="chips" id="chips" hidden></div>
+    <p class="count" id="count"></p>
   </div>
 </div>
 
-<dialog id="orderDialog">
-  <form class="dlg" id="orderForm">
-    <h2>Your order</h2>
-    <div class="summary" id="summary"></div>
-    <label>Your name
-      <input type="text" id="custName" required autocomplete="name">
-    </label>
-    <label>Department / shift (optional)
-      <input type="text" id="custDept">
-    </label>
-    <div class="actions">
-      <button type="button" class="btn ghost" id="cancelOrder">Cancel</button>
-      <button type="submit" class="btn" id="sendBtn">Send</button>
+<main class="grid" id="grid">
+  <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
+</main>
+
+<dialog id="viewDialog" class="view">
+  <button type="button" class="close" id="closeView" aria-label="Close">×</button>
+  <div class="view-grid">
+    <div class="gallery">
+      <div class="slides" id="slides"></div>
+      <button type="button" class="nav prev" id="prev" aria-label="Previous photo">‹</button>
+      <button type="button" class="nav next" id="next" aria-label="Next photo">›</button>
+      <div class="dots" id="dots"></div>
     </div>
-  </form>
+    <div class="view-body" id="viewBody"></div>
+  </div>
 </dialog>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js"></script>
 <script src="common.js"></script>
 <script>
+  const $ = id => document.getElementById(id);
   let PRODUCTS = [];
-  const cart = {}; // product id -> quantity
-  const byId = id => PRODUCTS.find(p => p.id === id);
+  let category = "";
 
   document.title = SHOP.name;
-  document.getElementById("shopName").textContent = SHOP.name;
-  document.getElementById("tagline").textContent = SHOP.tagline;
-  document.getElementById("sendBtn").textContent =
-    SHOP.orderMethod === "sms" ? "Send by SMS" : "Send on WhatsApp";
-  const catSel = document.getElementById("category");
+  $("shopName").textContent = SHOP.name;
+  $("tagline").textContent = SHOP.tagline;
 
   async function load() {
     const db = getDb();
     if (!db) {
-      document.getElementById("grid").innerHTML =
-        '<p class="empty">Shop is not connected yet. Add your Supabase keys in config.js.</p>';
+      $("grid").innerHTML = '<p class="empty">Shop is not connected yet. Add your Supabase keys in config.js.</p>';
       return;
     }
     const { data, error } = await db.from("products").select("*")
       .eq("visible", true).order("created_at", { ascending: false });
     if (error) {
-      document.getElementById("grid").innerHTML = `<p class="empty">Could not load products: ${esc(error.message)}</p>`;
+      $("grid").innerHTML = `<p class="empty">Could not load products: ${esc(error.message)}</p>`;
       return;
     }
     PRODUCTS = data;
     const categories = [...new Set(PRODUCTS.map(p => p.category).filter(Boolean))].sort();
-    catSel.innerHTML = '<option value="">All categories</option>' +
-      categories.map(c => `<option>${esc(c)}</option>`).join("");
-    catSel.style.display = categories.length ? "" : "none";
+    $("chips").hidden = !categories.length;
+    $("chips").innerHTML = ["", ...categories].map(c =>
+      `<button type="button" class="chip" data-cat="${esc(c)}" aria-pressed="${c === category}">${c ? esc(c) : "All"}</button>`).join("");
     render();
   }
 
   function render() {
-    const q = document.getElementById("search").value.trim().toLowerCase();
-    const cat = catSel.value;
+    const q = $("search").value.trim().toLowerCase();
     const items = PRODUCTS.filter(p =>
-      (!cat || p.category === cat) &&
+      (!category || p.category === category) &&
       (!q || (p.name + " " + (p.note || "")).toLowerCase().includes(q)));
 
-    document.getElementById("grid").innerHTML = items.length ? items.map(p => {
-      const qty = cart[p.id] || 0;
-      return `<article class="card">
-        <img src="${esc(p.image_url || PLACEHOLDER)}" alt="${esc(p.name)}" loading="lazy" onerror="this.onerror=null;this.src=PLACEHOLDER">
+    $("count").textContent = items.length === 1 ? "1 product" : items.length + " products";
+    $("grid").innerHTML = items.length ? items.map(p => {
+      const photos = photosOf(p);
+      const save = savePct(p);
+      return `<article class="card" data-id="${p.id}">
+        <button type="button" class="media" aria-label="View ${esc(p.name)}">
+          <img src="${esc(photos[0]?.url || PLACEHOLDER)}" alt="${esc(p.name)}" loading="lazy" onerror="this.onerror=null;this.src=PLACEHOLDER">
+          ${save >= 5 ? `<span class="tag">-${save}%</span>` : ""}
+          ${photos.length > 1 ? `<span class="pics">${photos.length} photos</span>` : ""}
+        </button>
         <div class="body">
+          ${p.category ? `<div class="cat">${esc(p.category)}</div>` : ""}
           <div class="name">${esc(p.name)}</div>
           ${p.note ? `<div class="note">${esc(p.note)}</div>` : ""}
+          <div class="price-row"><span class="price">${fmt(p.price)}</span></div>
           ${retailLink(p)}
-          <div class="row">
-            <span class="price">${fmt(p.price)}</span>
-            <div class="qty">
-              <button type="button" data-id="${p.id}" data-d="-1" ${qty ? "" : "disabled"} aria-label="Remove one">−</button>
-              <span>${qty}</span>
-              <button type="button" data-id="${p.id}" data-d="1" aria-label="Add one">+</button>
-            </div>
-          </div>
         </div>
       </article>`;
     }).join("") : '<p class="empty">No products found.</p>';
-
-    const lines = Object.entries(cart);
-    const count = lines.reduce((s, [, q]) => s + q, 0);
-    const total = lines.reduce((s, [id, q]) => s + byId(id).price * q, 0);
-    document.getElementById("bar").classList.toggle("show", count > 0);
-    document.getElementById("barCount").textContent = count + (count === 1 ? " item" : " items");
-    document.getElementById("barTotal").textContent = "Total " + fmt(total);
   }
 
-  document.getElementById("grid").addEventListener("click", e => {
-    const b = e.target.closest("button[data-id]");
+  $("search").addEventListener("input", render);
+  $("chips").addEventListener("click", e => {
+    const b = e.target.closest(".chip");
     if (!b) return;
-    const next = Math.max(0, (cart[b.dataset.id] || 0) + +b.dataset.d);
-    if (next) cart[b.dataset.id] = next; else delete cart[b.dataset.id];
+    category = b.dataset.cat;
+    $("chips").querySelectorAll(".chip").forEach(c => c.setAttribute("aria-pressed", c === b));
     render();
   });
-  document.getElementById("search").addEventListener("input", render);
-  catSel.addEventListener("change", render);
 
-  function orderLines() {
-    let total = 0;
-    const lines = Object.entries(cart).map(([id, q]) => {
-      const p = byId(id); total += p.price * q;
-      return { q, p, sub: p.price * q };
-    });
-    return { lines, total };
+  // Open the detail view when a card is tapped (but let the retail link work normally).
+  $("grid").addEventListener("click", e => {
+    if (e.target.closest("a")) return;
+    const card = e.target.closest(".card");
+    if (card) openView(PRODUCTS.find(p => p.id === card.dataset.id));
+  });
+
+  const dlg = $("viewDialog");
+  function openView(p) {
+    const photos = photosOf(p);
+    const urls = photos.length ? photos.map(ph => ph.url) : [PLACEHOLDER];
+    const save = savePct(p);
+    $("slides").innerHTML = urls.map((u, i) =>
+      `<img src="${esc(u)}" alt="${esc(p.name)} photo ${i + 1}" onerror="this.onerror=null;this.src=PLACEHOLDER">`).join("");
+    $("dots").innerHTML = urls.length > 1 ? urls.map((_, i) => `<i class="${i ? "" : "on"}"></i>`).join("") : "";
+    $("viewBody").innerHTML = `
+      ${p.category ? `<div class="cat">${esc(p.category)}</div>` : ""}
+      <div class="name">${esc(p.name)}</div>
+      <div class="price-row">
+        <span class="price">${fmt(p.price)}</span>
+        ${save ? `<span class="was">${fmt(p.retail_price)}</span><span class="tag" style="position:static">-${save}%</span>` : ""}
+      </div>
+      ${p.note ? `<div class="note">${esc(p.note)}</div>` : ""}
+      ${retailLink(p)}`;
+    dlg.showModal();
+    $("slides").scrollLeft = 0;
+    updateNav();
   }
 
-  const dlg = document.getElementById("orderDialog");
-  document.getElementById("openOrder").addEventListener("click", () => {
-    const { lines, total } = orderLines();
-    document.getElementById("summary").innerHTML = lines.map(({ q, p, sub }) =>
-      `<div><span>${q} × ${esc(p.name)}</span><span>${fmt(sub)}</span></div>`).join("") +
-      `<div class="total"><span>Total</span><span>${fmt(total)}</span></div>`;
-    try { document.getElementById("custName").value = localStorage.getItem("custName") || ""; } catch {}
-    dlg.showModal();
-  });
-  document.getElementById("cancelOrder").addEventListener("click", () => dlg.close());
-
-  document.getElementById("orderForm").addEventListener("submit", e => {
-    e.preventDefault();
-    const name = document.getElementById("custName").value.trim();
-    const dept = document.getElementById("custDept").value.trim();
-    try { localStorage.setItem("custName", name); } catch {}
-    const { lines, total } = orderLines();
-    const msg = `Hi! New order from ${name}${dept ? " (" + dept + ")" : ""}:\n` +
-      lines.map(({ q, p, sub }) => `- ${q} x ${p.name} (${fmt(sub)})`).join("\n") +
-      `\nTotal: ${fmt(total)}`;
-    const url = SHOP.orderMethod === "sms"
-      ? `sms:+${SHOP.phone}?&body=${encodeURIComponent(msg)}`
-      : `https://wa.me/${SHOP.phone}?text=${encodeURIComponent(msg)}`;
-    dlg.close();
-    window.location.href = url;
-  });
+  function slideIndex() {
+    const s = $("slides");
+    return Math.round(s.scrollLeft / (s.clientWidth || 1));
+  }
+  function updateNav() {
+    const count = $("slides").children.length, i = slideIndex();
+    $("prev").hidden = count < 2 || i === 0;
+    $("next").hidden = count < 2 || i >= count - 1;
+    [...$("dots").children].forEach((d, n) => d.classList.toggle("on", n === i));
+  }
+  $("slides").addEventListener("scroll", updateNav, { passive: true });
+  $("prev").addEventListener("click", () => $("slides").scrollBy({ left: -$("slides").clientWidth }));
+  $("next").addEventListener("click", () => $("slides").scrollBy({ left: $("slides").clientWidth }));
+  $("closeView").addEventListener("click", () => dlg.close());
+  dlg.addEventListener("click", e => { if (e.target === dlg) dlg.close(); });
 
   load();
 </script>
