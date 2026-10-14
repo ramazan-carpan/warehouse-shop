@@ -302,6 +302,9 @@
     load();
   });
 
+  // Phones can restore this page from memory when you tap Back; force a fresh login instead.
+  window.addEventListener("pageshow", e => { if (e.persisted) location.reload(); });
+
   init();
 </script>
 </body>

@@ -42,5 +42,13 @@ function retailLink(p) {
 let _db;
 function getDb() {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !window.supabase) return null;
-  return _db ||= window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  if (!_db) {
+    // Keep the admin login in memory only, so leaving the admin page logs out.
+    // Also clear any login saved by older versions of the site.
+    try {
+      Object.keys(localStorage).filter(k => /^sb-.*-auth-token$/.test(k)).forEach(k => localStorage.removeItem(k));
+    } catch {}
+    _db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } });
+  }
+  return _db;
 }
